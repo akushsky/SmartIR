@@ -125,6 +125,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         self._current_fan_mode = self._fan_modes[0]
         self._current_swing_mode = None
         self._last_on_operation = None
+        self._last_operation = None
 
         self._current_temperature = None
         self._current_humidity = None
@@ -165,6 +166,8 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
 
             if 'last_on_operation' in last_state.attributes:
                 self._last_on_operation = last_state.attributes['last_on_operation']
+            if 'last_operation' in last_state.attributes:
+                self._last_operation = last_state.attributes['last_operation']
 
         if self._temperature_sensor:
             async_track_state_change(self.hass, self._temperature_sensor,
@@ -244,6 +247,11 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         return self._last_on_operation
 
     @property
+    def last_operation(self):
+        """Return the last operation."""
+        return self._last_operation
+
+    @property
     def fan_modes(self):
         """Return the list of available fan modes."""
         return self._fan_modes
@@ -283,6 +291,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         """Platform specific attributes."""
         return {
             'last_on_operation': self._last_on_operation,
+            'last_operation': self._last_operation,
             'device_code': self._device_code,
             'manufacturer': self._manufacturer,
             'supported_models': self._supported_models,
@@ -318,7 +327,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
-        previous_mode = self._hvac_mode
+        self._last_operation = self._hvac_mode
         self._hvac_mode = hvac_mode
 
         if not hvac_mode == HVAC_MODE_OFF:
@@ -327,7 +336,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         await self.send_command()
 
         # Change state to last_on_operation if previous was off
-        if previous_mode == HVAC_MODE_OFF:
+        if self._last_operation == HVAC_MODE_OFF:
             self._hvac_mode = self._last_on_operation
 
         await self.async_update_ha_state()
