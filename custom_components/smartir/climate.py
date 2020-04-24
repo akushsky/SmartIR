@@ -151,7 +151,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
             self._commands_encoding,
             self._controller_data,
             self._delay)
-            
+
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
         await super().async_added_to_hass()
@@ -307,6 +307,9 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         if temperature is None:
             return
 
+        if hvac_mode is None:
+            hvac_mode = self._last_on_operation
+
         if temperature < self._min_temperature or temperature > self._max_temperature:
             _LOGGER.warning('The temperature value is out of min/max range')
             return
@@ -316,14 +319,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         else:
             self._target_temperature = round(temperature, 1)
 
-        if hvac_mode:
-            await self.async_set_hvac_mode(hvac_mode)
-            return
-
-        if not self._hvac_mode.lower() == HVAC_MODE_OFF:
-            await self.send_command()
-
-        await self.async_update_ha_state()
+        await self.async_set_hvac_mode(hvac_mode)
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
@@ -373,11 +369,12 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
             try:
                 self._on_by_remote = False
                 operation_mode = self._hvac_mode
+                last_operation_mode = self._last_operation
                 fan_mode = self._current_fan_mode
                 swing_mode = self._current_swing_mode
                 target_temperature = '{0:g}'.format(self._target_temperature)
 
-            if operation_mode.lower() == HVAC_MODE_OFF:
+            if operation_mode.lower() == HVAC_MODE_OFF or last_operation_mode.lower() == HVAC_MODE_OFF:
                 if self._last_on_operation in self._commands['off']:
                     command = self._commands['off'][self._last_on_operation][target_temperature]
                 else:
