@@ -52,6 +52,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_POWER_SENSOR_RESTORE_STATE, default=False): cv.boolean
 })
 
+
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the IR Climate platform."""
     device_code = config.get(CONF_DEVICE_CODE)
@@ -91,6 +92,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities([SmartIRClimate(
         hass, config, device_data
     )])
+
 
 class SmartIRClimate(ClimateEntity, RestoreEntity):
     def __init__(self, hass, config, device_data):
@@ -132,7 +134,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
 
         self._unit = hass.config.units.temperature_unit
 
-        #Supported features
+        # Supported features
         self._support_flags = SUPPORT_FLAGS
         self._support_swing = False
 
@@ -144,7 +146,7 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         self._temp_lock = asyncio.Lock()
         self._on_by_remote = False
 
-        #Init the IR/RF controller
+        # Init the IR/RF controller
         self._controller = get_controller(
             self.hass,
             self._supported_controller,
@@ -371,75 +373,80 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
                 operation_mode = self._hvac_mode
                 last_operation_mode = self._last_operation
                 fan_mode = self._current_fan_mode
-                swing_mode = self._current_swing_mode
+                swing_mode = self._current_swing_mode  # TODO: Rearrange according to upstream
                 target_temperature = '{0:g}'.format(self._target_temperature)
 
-            if operation_mode.lower() == HVAC_MODE_OFF or last_operation_mode.lower() == HVAC_MODE_OFF:
-                if self._last_on_operation in self._commands['off']:
-                    command = self._commands['off'][self._last_on_operation][target_temperature]
+                if operation_mode.lower() == HVAC_MODE_OFF or last_operation_mode.lower() == HVAC_MODE_OFF:
+                    if self._last_on_operation in self._commands['off']:
+                        command = self._commands['off'][self._last_on_operation][target_temperature]
+                    else:
+                        command = self._commands['off']['default']
                 else:
-                    command = self._commands['off']['default']
-            else:
-                command = self._commands[operation_mode][fan_mode][target_temperature]
+                    command = self._commands[operation_mode][fan_mode][target_temperature]
 
                 await self._controller.send(command)
                 await asyncio.sleep(self._delay)
             except Exception as e:
                 _LOGGER.exception(e)
 
-    async def _async_temp_sensor_changed(self, entity_id, old_state, new_state):
-        """Handle temperature sensor changes."""
-        if new_state is None:
-            return
 
-        self._async_update_temp(new_state)
+async def _async_temp_sensor_changed(self, entity_id, old_state, new_state):
+    """Handle temperature sensor changes."""
+    if new_state is None:
+        return
+
+    self._async_update_temp(new_state)
+    await self.async_update_ha_state()
+
+
+async def _async_humidity_sensor_changed(self, entity_id, old_state, new_state):
+    """Handle humidity sensor changes."""
+    if new_state is None:
+        return
+
+    self._async_update_humidity(new_state)
+    await self.async_update_ha_state()
+
+
+async def _async_power_sensor_changed(self, entity_id, old_state, new_state):
+    """Handle power sensor changes."""
+    if new_state is None:
+        return
+
+    if new_state.state == old_state.state:
+        return
+
+    if new_state.state == STATE_ON and self._hvac_mode == HVAC_MODE_OFF:
+        self._on_by_remote = True
+        if self._power_sensor_restore_state == True and self._last_on_operation is not None:
+            self._hvac_mode = self._last_on_operation
+        else:
+            self._hvac_mode = STATE_ON
+
         await self.async_update_ha_state()
 
-    async def _async_humidity_sensor_changed(self, entity_id, old_state, new_state):
-        """Handle humidity sensor changes."""
-        if new_state is None:
-            return
-
-        self._async_update_humidity(new_state)
+    if new_state.state == STATE_OFF:
+        self._on_by_remote = False
+        if self._hvac_mode != HVAC_MODE_OFF:
+            self._hvac_mode = HVAC_MODE_OFF
         await self.async_update_ha_state()
 
-    async def _async_power_sensor_changed(self, entity_id, old_state, new_state):
-        """Handle power sensor changes."""
-        if new_state is None:
-            return
 
-        if new_state.state == old_state.state:
-            return
+@callback
+def _async_update_temp(self, state):
+    """Update thermostat with latest state from temperature sensor."""
+    try:
+        if state.state != STATE_UNKNOWN:
+            self._current_temperature = float(state.state)
+    except ValueError as ex:
+        _LOGGER.error("Unable to update from temperature sensor: %s", ex)
 
-        if new_state.state == STATE_ON and self._hvac_mode == HVAC_MODE_OFF:
-            self._on_by_remote = True
-            if self._power_sensor_restore_state == True and self._last_on_operation is not None:
-                self._hvac_mode = self._last_on_operation
-            else:
-                self._hvac_mode = STATE_ON
 
-            await self.async_update_ha_state()
-
-        if new_state.state == STATE_OFF:
-            self._on_by_remote = False
-            if self._hvac_mode != HVAC_MODE_OFF:
-                self._hvac_mode = HVAC_MODE_OFF
-            await self.async_update_ha_state()
-
-    @callback
-    def _async_update_temp(self, state):
-        """Update thermostat with latest state from temperature sensor."""
-        try:
-            if state.state != STATE_UNKNOWN:
-                self._current_temperature = float(state.state)
-        except ValueError as ex:
-            _LOGGER.error("Unable to update from temperature sensor: %s", ex)
-
-    @callback
-    def _async_update_humidity(self, state):
-        """Update thermostat with latest state from humidity sensor."""
-        try:
-            if state.state != STATE_UNKNOWN:
-                self._current_humidity = float(state.state)
-        except ValueError as ex:
-            _LOGGER.error("Unable to update from humidity sensor: %s", ex)
+@callback
+def _async_update_humidity(self, state):
+    """Update thermostat with latest state from humidity sensor."""
+    try:
+        if state.state != STATE_UNKNOWN:
+            self._current_humidity = float(state.state)
+    except ValueError as ex:
+        _LOGGER.error("Unable to update from humidity sensor: %s", ex)
